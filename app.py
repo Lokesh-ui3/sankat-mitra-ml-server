@@ -9,7 +9,6 @@ from flask_cors import CORS
 # --- Configuration ---
 INPUT_CSV_FILE = 'health_data_final.csv'
 MODEL_FILE_PATH = 'risk_model.pkl'
-# These will be populated when the model is trained or loaded
 MODEL_FEATURES = [] 
 MODEL_DTYPES = None
 
@@ -21,7 +20,6 @@ def train_and_save_model():
     global MODEL_FEATURES, MODEL_DTYPES
     print("--- Starting Model Training ---")
     
-    # Load the dataset
     try:
         df = pd.read_csv(INPUT_CSV_FILE)
         print("Dataset loaded successfully.")
@@ -29,20 +27,17 @@ def train_and_save_model():
         print(f"FATAL ERROR: Could not find the dataset '{INPUT_CSV_FILE}'.")
         exit()
 
-    # Safely convert date column
     try:
         df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y')
     except Exception as e:
         print(f"FATAL ERROR: Could not parse dates in '{INPUT_CSV_FILE}'. Error: {e}")
         exit()
 
-    # Feature Engineering
     df['month'] = df['date'].dt.month
     df['day_of_year'] = df['date'].dt.dayofyear
     df['day_of_week'] = df['date'].dt.dayofweek
     print("Feature engineering complete.")
 
-    # Define Features (X) and Target (y)
     target = 'risk_level'
     features_to_drop = [target, 'date', 'village_name', 'bacterial_test_result']
     MODEL_FEATURES = [col for col in df.columns if col not in features_to_drop]
@@ -50,18 +45,15 @@ def train_and_save_model():
     X = df[MODEL_FEATURES]
     y = df[target]
 
-    # *** NEW: Capture the data types of the training data ***
     MODEL_DTYPES = X.dtypes.to_dict()
 
     print(f"Features for training: {MODEL_FEATURES}")
 
-    # Train the model
     print("Training the Random Forest model on the full dataset...")
     model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1, class_weight='balanced')
     model.fit(X, y)
     print("Model training complete.")
 
-    # Save the trained model and features
     joblib.dump({'model': model, 'features': MODEL_FEATURES, 'dtypes': MODEL_DTYPES}, MODEL_FILE_PATH)
     print(f"Model and metadata saved successfully to '{MODEL_FILE_PATH}'")
     
@@ -71,7 +63,6 @@ def train_and_save_model():
 app = Flask(__name__)
 CORS(app) 
 
-# Load the model and its metadata once when the server starts
 if not os.path.exists(MODEL_FILE_PATH):
     model = train_and_save_model()
 else:
@@ -88,19 +79,14 @@ def predict():
     try:
         data = request.get_json()
         
-        # Create a pandas DataFrame from the input data, ensuring correct column order
         input_df = pd.DataFrame([data], columns=MODEL_FEATURES)
-
-        # *** FIX: Ensure data types match the training data before prediction ***
         input_df = input_df.astype(MODEL_DTYPES)
 
-        # Make prediction and get probabilities
         prediction = model.predict(input_df)[0]
         probabilities = model.predict_proba(input_df)[0]
 
         risk_labels = {0: 'Low Risk', 1: 'Medium Risk', 2: 'High Risk'}
 
-        # Prepare the response
         response = {
             'prediction': int(prediction),
             'risk_label': risk_labels.get(prediction, 'Unknown'),
@@ -117,5 +103,8 @@ def predict():
 
 # --- 3. Run the Flask App ---
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    # Get the port from the environment variable Render sets, default to 5000 for local dev
+    port = int(os.environ.get('PORT', 5000))
+    # Run the app on 0.0.0.0 to make it accessible from outside the container
+    app.run(host='0.0.0.0', port=port)
 
